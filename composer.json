@@ -1,0 +1,18 @@
+{
+    "name": "italystrap/license-manager-client",
+    "type": "wordpress-plugin",
+    "license": "GPL3",
+    "authors": [
+        {
+            "name": "overclokk",
+            "email": "info@overclokk.net"
+        }
+    ],
+    "require": {},
+    "autoload": {
+        "classmap": [],
+        "psr-4": {
+            "ItalyStrap\\": "src/"
+        }
+    }
+}
