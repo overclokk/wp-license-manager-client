@@ -26,6 +26,8 @@
 
 namespace ItalyStrap\License_Manager;
 
+use InvalidArgumentException;
+
 class Client {
 
 	/**
@@ -71,6 +73,8 @@ class Client {
 	 */
 	private $plugin_file;
 
+	private static $count = 0;
+
 	/**
 	 * Initializes the license manager client.
 	 *
@@ -83,177 +87,38 @@ class Client {
 	 */
 	public function __construct( $product_id, $product_name, $text_domain, $api_url,
 								 $type = 'theme', $plugin_file = '' ) {
-		// Store setup data
-		$this->product_id = $product_id;
-		$this->product_name = $product_name;
-		$this->text_domain = $text_domain;
-		$this->api_endpoint = $api_url;
-		$this->type = $type;
-		$this->plugin_file = $plugin_file;
 
-		// Add actions required for the class's functionality.
-		// NOTE: Everything should be done through actions and filters.
-		if ( is_admin() ) {
-			// Add the menu screen for inserting license information
-			add_action( 'admin_menu', array( $this, 'add_license_settings_page' ) );
-			add_action( 'admin_init', array( $this, 'add_license_settings_fields' ) );
-
-			// Add a nag text for reminding the user to save the license information
-			add_action( 'admin_notices', array( $this, 'show_admin_notices' ) );
-
-			if ( $type == 'theme' ) {
-				// Check for updates (for themes)
-				add_filter( 'pre_set_site_transient_update_themes', array( $this, 'check_for_update' ) );
-			} elseif ( $type == 'plugin' ) {
-				// Check for updates (for plugins)
-				add_filter( 'pre_set_site_transient_update_plugins', array( $this, 'check_for_update' ) );
-
-				// Showing plugin information
-				add_filter( 'plugins_api', array( $this, 'plugins_api_handler' ), 10, 3 );
-			}
+		if ( ! is_string( $product_id ) ) {
+			throw new InvalidArgumentException( '$product_id must be a string' );
 		}
-	}
 
-	//
-	// LICENSE SETTINGS
-	//
-
-	/**
-	 * Creates the settings items for entering license information (email + license key).
-	 *
-	 * NOTE:
-	 * If you want to move the license settings somewhere else (e.g. your theme / plugin
-	 * settings page), we suggest you override this function in a subclass and
-	 * initialize the settings fields yourself. Just make sure to use the same
-	 * settings fields so that ItalyStrap\License_Manager\Client() can still find the settings values.
-	 */
-	public function add_license_settings_page() {
-		$title = sprintf( __( '%s License', $this->text_domain ), $this->product_name );
-
-		add_options_page(
-			$title,
-			$title,
-			'read',
-			$this->get_settings_page_slug(),
-			array( $this, 'render_licenses_menu' )
-		);
-	}
-
-	/**
-	 * Creates the settings fields needed for the license settings menu.
-	 */
-	public function add_license_settings_fields() {
-		$settings_group_id = $this->product_id . '-license-settings-group';
-		$settings_section_id = $this->product_id . '-license-settings-section';
-
-		register_setting( $settings_group_id, $this->get_settings_field_name() );
-
-		add_settings_section(
-			$settings_section_id,
-			__( 'License', $this->text_domain ),
-			array( $this, 'render_settings_section' ),
-			$settings_group_id
-		);
-
-		add_settings_field(
-			$this->product_id . '-license-email',
-			__( 'License e-mail address', $this->text_domain ),
-			array( $this, 'render_email_settings_field' ),
-			$settings_group_id,
-			$settings_section_id
-		);
-
-		add_settings_field(
-			$this->product_id . '-license-key',
-			__( 'License key', $this->text_domain ),
-			array( $this, 'render_license_key_settings_field' ),
-			$settings_group_id,
-			$settings_section_id
-		);
-	}
-
-	/**
-	 * Renders the description for the settings section.
-	 */
-	public function render_settings_section() {
-		_e( 'Insert your license information to enable updates.', $this->text_domain );
-	}
-
-	/**
-	 * Renders the settings page for entering license information.
-	 */
-	public function render_licenses_menu() {
-		$title = sprintf( __( '%s License', $this->text_domain ), $this->product_name );
-		$settings_group_id = $this->product_id . '-license-settings-group';
-
-		?>
-		<div class="wrap">
-			<form action='options.php' method='post'>
-
-				<h2><?php echo $title; ?></h2>
-
-				<?php
-				settings_fields( $settings_group_id );
-				do_settings_sections( $settings_group_id );
-				submit_button();
-				?>
-
-			</form>
-		</div>
-	<?php
-	}
-
-	/**
-	 * Renders the email settings field on the license settings page.
-	 */
-	public function render_email_settings_field() {
-		$settings_field_name = $this->get_settings_field_name();
-		$options = get_option( $settings_field_name );
-		?>
-		<input type='text' name='<?php echo $settings_field_name; ?>[email]'
-			   value='<?php echo $options['email']; ?>' class='regular-text'>
-	<?php
-	}
-
-	/**
-	 * Renders the license key settings field on the license settings page.
-	 */
-	public function render_license_key_settings_field() {
-		$settings_field_name = $this->get_settings_field_name();
-		$options = get_option( $settings_field_name );
-		?>
-		<input type='text' name='<?php echo $settings_field_name; ?>[license_key]'
-			   value='<?php echo $options['license_key']; ?>' class='regular-text'>
-	<?php
-	}
-
-	/**
-	 * If the license has not been configured properly, display an admin notice.
-	 */
-	public function show_admin_notices() {
-		if ( ! $this->get_license_key() ) {
-			$msg = __( 'Please enter your email and license key to enable updates to %s.', $this->text_domain );
-			$msg = sprintf( $msg, $this->product_name );
-			?>
-				<div class="update-nag">
-					<p>
-						<?php echo $msg; ?>
-					</p>
-
-					<p>
-						<a href="<?php echo admin_url( 'options-general.php?page=' . $this->get_settings_page_slug() ); ?>">
-							<?php _e( 'Complete the setup now.', $this->text_domain ); ?>
-						</a>
-					</p>
-				</div>
-			<?php
+		if ( ! is_string( $product_name ) ) {
+			throw new InvalidArgumentException( '$product_name must be a string' );
 		}
+
+		if ( ! is_string( $text_domain ) ) {
+			throw new InvalidArgumentException( '$text_domain must be a string' );
+		}
+
+		if ( false === filter_var( $api_url, FILTER_VALIDATE_URL ) ) {
+			throw new InvalidArgumentException( '$api_url must be a string' );
+		}
+
+		if ( ! in_array( $type, array( 'theme', 'plugin' ) ) ) {
+			throw new InvalidArgumentException( '$type must be a string "theme" or "plugin"' );
+		}
+
+		if ( ! is_string( $plugin_file ) ) {
+			throw new InvalidArgumentException( '$plugin_file must be a string' );
+		}
+
+		$this->product_id	= $product_id;
+		$this->product_name	= $product_name;
+		$this->text_domain	= $text_domain;
+		$this->api_endpoint	= $api_url;
+		$this->type			= $type;
+		$this->plugin_file	= $plugin_file;
 	}
-
-
-	//
-	// CHECKING FOR UPDATES
-	//
 
 	/**
 	 * The filter that checks if there are updates to the theme or plugin
@@ -265,36 +130,78 @@ class Client {
 	 * @return mixed        The transient with our (possible) additions.
 	 */
 	public function check_for_update( $transient ) {
+
+		/**
+		 * With this fires only once
+		 */
 		if ( empty( $transient->checked ) ) {
 			return $transient;
 		}
 
-		$info = $this->is_update_available();
-		if ( $info !== false ) {
-
-			if ( $this->is_theme() ) {
-				// Theme update
-				$theme_data = wp_get_theme();
-				$theme_slug = $theme_data->get_template();
-
-				$transient->response[$theme_slug] = array(
-					'new_version' => $info->version,
-					'package'     => $info->package_url,
-					'url'         => $info->description_url
-				);
-			} else {
-				// Plugin update
-				$plugin_slug = plugin_basename( $this->plugin_file );
-
-				$transient->response[$plugin_slug] = (object) array(
-					'new_version' => $info->version,
-					'package'     => $info->package_url,
-					'slug'        => $plugin_slug
-				);
-			}
+		/**
+		 * If no update available exit
+		 */
+		if ( false === $this->is_update_available() ) {
+			return $transient;
 		}
 
+		// if ( $this->is_theme() ) {
+		// 	$transient = $this->theme( $transient );
+
+		// } else {
+		// 	$transient = $this->plugin( $transient );
+		// }
+		// 
+		if ( ! is_callable( array( $this, $this->type ) ) ) {
+			return $transient;
+		}
+
+		// $transient = call_user_func( array( $this, $this->type ), $transient );
+
+		return call_user_func( array( $this, $this->type ), $transient );
+	}
+
+	/**
+	 * Theme update manager
+	 *
+	 * @param  mixed $transient [description]
+	 * @return string        [description]
+	 */
+	public function theme( $transient ) {
+
+		// Theme update
+		$theme_data = wp_get_theme();
+		$theme_slug = $theme_data->get_template();
+
+		$transient->response[ $theme_slug ] = array(
+			'new_version' => $info->version,
+			'package'     => $info->package_url,
+			'url'         => $info->description_url
+		);
+	
 		return $transient;
+	
+	}
+
+	/**
+	 * Theme update manager
+	 *
+	 * @param  mixed $transient [description]
+	 * @return string        [description]
+	 */
+	public function plugin( $transient ) {
+
+		// Plugin update
+		$plugin_slug = plugin_basename( $this->plugin_file );
+
+		$transient->response[ $plugin_slug ] = (object) array(
+			'new_version' => $info->version,
+			'package'     => $info->package_url,
+			'slug'        => $plugin_slug
+		);
+	
+		return $transient;
+	
 	}
 
 	/**
@@ -304,7 +211,9 @@ class Client {
 	 *                      Otherwise returns false.
 	 */
 	public function is_update_available() {
+
 		$license_info = $this->get_license_info();
+
 		if ( $this->is_api_error( $license_info ) ) {
 			return false;
 		}
@@ -356,7 +265,7 @@ class Client {
 	 * @return object   The API response.
 	 */
 	public function plugins_api_handler( $res, $action, $args ) {
-		if ( $action == 'plugin_information' ) {
+		if ( $action === 'plugin_information' ) {
 
 			// If the request is for this plugin, respond to it
 			if ( isset( $args->slug ) && $args->slug == plugin_basename( $this->plugin_file ) ) {
@@ -404,26 +313,12 @@ class Client {
 	//
 
 	/**
-	 * @return string   The name of the settings field storing all license manager settings.
-	 */
-	protected function get_settings_field_name() {
-		return $this->product_id . '-license-settings';
-	}
-
-	/**
-	 * @return string   The slug id of the licenses settings page.
-	 */
-	protected function get_settings_page_slug() {
-		return $this->product_id . '-licenses';
-	}
-
-	/**
 	 * A shorthand function for checking if we are in a theme or a plugin.
 	 *
 	 * @return bool True if this is a theme. False if a plugin.
 	 */
 	private function is_theme() {
-		return $this->type == 'theme';
+		return (bool) 'theme' === $this->type;
 	}
 
 	/**
@@ -439,36 +334,6 @@ class Client {
 
 			return $plugin_data['Version'];
 		}
-	}
-
-	private function get_license_key() {
-		// First, check if configured in wp-config.php
-		$license_email = ( defined( 'FOURBASE_LICENSE_EMAIL' ) ) ? FOURBASE_LICENSE_EMAIL : '';
-		$license_key = ( defined( 'FOURBASE_LICENSE_KEY' ) ) ? FOURBASE_LICENSE_KEY : '';
-
-		// If not found, look up from database
-		if ( ! $license_key || strlen( $license_key ) < 8 ) {
-			$options = get_option( $this->get_settings_field_name() );
-
-			if ( $options
-				 && isset( $options['email'] )
-				 && isset( $options['license_key'] )
-				 && strlen( $options['email'] ) > 0
-				 && strlen( $options['license_key'] ) >= 8 ) {
-				$license_email = $options['email'];
-				$license_key = $options['license_key'];
-			} else {
-				$license_email = '';
-				$license_key = '';
-			}
-		}
-
-		if ( strlen( $license_email ) > 0 && strlen( $license_key ) >= 8 ) {
-			return array( 'key' => $license_key, 'email' => $license_email );
-		}
-
-		// No license key found
-		return false;
 	}
 
 	//
@@ -524,4 +389,10 @@ class Client {
 		return false;
 	}
 
+	/**
+	 * @return string   The name of the settings field storing all license manager settings.
+	 */
+	protected function get_settings_field_name() {
+		return $this->product_id . '-license-settings';
+	}
 }
